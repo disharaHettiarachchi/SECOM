@@ -89,7 +89,11 @@ def evaluate_classifier(model, X_test: pd.DataFrame, y_test: pd.Series) -> dict[
 
 
 def comparison_table(model_results: dict[str, dict[str, object]]) -> pd.DataFrame:
-    """Convert model results into a sorted table for Streamlit."""
+    """Convert model results into an imbalance-aware comparison table.
+
+    F1 and recall lead the ordering because a fault detector that misses every
+    fault is not useful even when its overall accuracy or ranking AUC is high.
+    """
 
     rows: list[dict[str, object]] = []
     for model_name, result in model_results.items():
@@ -116,7 +120,7 @@ def comparison_table(model_results: dict[str, dict[str, object]]) -> pd.DataFram
     table = pd.DataFrame(rows)
     if "f1" in table.columns:
         table = table.sort_values(
-            by=["pr_auc", "f1", "recall"],
+            by=["f1", "recall", "pr_auc", "balanced_accuracy"],
             ascending=False,
             na_position="last",
         )
@@ -130,4 +134,3 @@ def classification_report_table(report: dict[str, object]) -> pd.DataFrame:
     numeric_columns = table.select_dtypes(include="number").columns
     table[numeric_columns] = table[numeric_columns].round(4)
     return table
-
