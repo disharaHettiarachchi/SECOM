@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import time
+import platform
 from dataclasses import asdict, dataclass
 from typing import Any
 
 import joblib
+import numpy as np
 import pandas as pd
+import sklearn
 from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
 from sklearn.feature_selection import SelectKBest, f_classif
 from sklearn.impute import SimpleImputer
@@ -33,6 +36,8 @@ class TrainingConfig:
     selected_features: int = 80
     imputation_strategy: str = "median"
     include_xgboost: bool = False
+    selection_metric: str = "f1"
+    decision_threshold: float = 0.50
 
 
 def available_models(random_state: int = 42, include_xgboost: bool = False) -> dict[str, Any]:
@@ -53,6 +58,7 @@ def available_models(random_state: int = 42, include_xgboost: bool = False) -> d
         ),
         "Support Vector Machine": SVC(
             class_weight="balanced",
+            probability=True,
             random_state=random_state,
         ),
         "Gradient Boosting": GradientBoostingClassifier(random_state=random_state),
@@ -162,7 +168,15 @@ def train_and_evaluate_models(
     successful_table = table[table["status"] == "trained"] if not table.empty else table
     best_model_name = None
     if not successful_table.empty:
-        best_model_name = str(successful_table.iloc[0]["model"])
+        selection_metric = config.selection_metric
+        if selection_metric not in successful_table.columns:
+            raise ValueError(f"Unknown model-selection metric: {selection_metric}")
+        ranked_models = successful_table.sort_values(
+            by=[selection_metric, "recall", "pr_auc", "balanced_accuracy"],
+            ascending=False,
+            na_position="last",
+        )
+        best_model_name = str(ranked_models.iloc[0]["model"])
 
     return {
         "config": asdict(config),
@@ -177,6 +191,7 @@ def train_and_evaluate_models(
         "y_test": y_test,
         "X_test": X_test,
         "selected_feature_count": k_best,
+        "selection_metric": config.selection_metric,
     }
 
 
@@ -211,7 +226,41 @@ def create_model_artifact(training_result: dict[str, Any]) -> dict[str, Any]:
             "test_records": int(training_result["X_test_shape"][0]),
         },
         "selected_feature_count": training_result["selected_feature_count"],
+        "selection_metric": training_result.get("selection_metric", "f1"),
+        "decision_threshold": float(training_result["config"].get("decision_threshold", 0.50)),
+        "library_versions": {
+            "python": platform.python_version(),
+            "numpy": np.__version__,
+            "pandas": pd.__version__,
+            "scikit_learn": sklearn.__version__,
+            "joblib": joblib.__version__,
+        },
         "artifact_note": "Generated from the Colab/local training workflow for Streamlit Cloud inference.",
+    }
+
+
+def validate_model_artifact(artifact: dict[str, Any]) -> None:
+    """Raise a clear error when an uploaded file is not a usable artifact."""
+
+    required_keys = {"model_name", "pipeline", "metrics", "feature_columns"}
+    missing_keys = sorted(required_keys.difference(artifact))
+    if missing_keys:
+        raise ValueError(
+            "The Joblib file is missing required fields: " + ", ".join(missing_keys)
+        )
+
+
+def artifact_runtime_status(artifact: dict[str, Any]) -> dict[str, str | bool | None]:
+    """Describe whether the current scikit-learn runtime matches training."""
+
+    versions = artifact.get("library_versions", {})
+    trained_version = versions.get("scikit_learn")
+    runtime_version = sklearn.__version__
+    compatible = trained_version is None or trained_version == runtime_version
+    return {
+        "trained_sklearn": trained_version,
+        "runtime_sklearn": runtime_version,
+        "compatible": compatible,
     }
 
 
@@ -235,10 +284,14 @@ def load_model_artifact(
     path = MODELS_DIR / filename
     if not path.exists():
         return None
-    return joblib.load(path)
+    artifact = joblib.load(path)
+    validate_model_artifact(artifact)
+    return artifact
 
 
 def load_uploaded_model_artifact(uploaded_file) -> dict[str, Any]:
     """Load a Joblib model artifact uploaded through Streamlit."""
 
-    return joblib.load(uploaded_file)
+    artifact = joblib.load(uploaded_file)
+    validate_model_artifact(artifact)
+    return artifact
