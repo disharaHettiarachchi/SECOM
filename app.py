@@ -33,7 +33,7 @@ def cached_dataset_notes():
 ensure_project_directories()
 
 st.title("Machine Learning-Based Industrial Fault Detection System")
-st.caption("SECOM semiconductor sensor data | Binary normal/fault classification")
+st.caption("SECOM semiconductor sensor data | Imbalance-aware normal/fault classification")
 
 data = cached_dataset()
 features, target = split_features_and_target(data)
@@ -89,6 +89,29 @@ preparation, model comparison, evaluation, dashboard implementation, prediction,
 and decision-support reporting. The research component is the comparison of
 machine learning models under class imbalance.
 """
+)
+
+st.subheader("System Workflow")
+workflow_columns = st.columns(5)
+for column, title, detail in zip(
+    workflow_columns,
+    ["1. Inspect", "2. Prepare", "3. Compare", "4. Predict", "5. Support"],
+    [
+        "Review missingness and class imbalance.",
+        "Clean, impute, scale, and select features.",
+        "Evaluate four supervised models.",
+        "Score samples or uploaded sensor CSV files.",
+        "Rank risk and recommend quality-control actions.",
+    ],
+):
+    with column:
+        st.markdown(f"**{title}**")
+        st.caption(detail)
+
+st.info(
+    "Research prototype: predictions are decision-support signals based on an "
+    "anonymised historical dataset. They do not replace process engineers or "
+    "validated production quality procedures."
 )
 
 with st.expander("Dataset notes from secom.names"):
